@@ -48,7 +48,7 @@ Assume we have two microservices, user API and book API, to manage users and boo
 2. If not, load user and book from APIs into cache (pessimistic concurrency lock with [SETNX or Redlock](https://redis.io/topics/distlock))
 3. Check balance and SKU based on the cached value with [optimistic concurrency lock](https://redis.io/topics/transactions). If order is valid, update the balance in the cache.   
 *Note:* apart from updating Redis cache, this step should not have any side effect, e.g. API call or database operation.
-4. Call user and book APIs to update balance and SKU respectively.  
+4. Enqueue commands to update balance and SKU respectively (eventual consistency).  
 *Note:* When user / book APIs update the entity, it needs to follow the same pattern, i.e. make sure the write-through cache is updated before the actual update happens.
 5. Any failure will invalidate the cache and trigger a compensation action within a new distributed transaction.
 
@@ -72,9 +72,7 @@ Assume we have two microservices, user API and book API, to manage users and boo
     
   try
   {
-    // call User API to update User
-    ...
-    // call Book API to update Book
+    // enqueue messages for eventual consistency
     ...
   }
   catch
