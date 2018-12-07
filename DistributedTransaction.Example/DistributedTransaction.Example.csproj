@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DistributedTransaction.Core\DistributedTransaction.Core.csproj" />
+    <ProjectReference Include="..\DistributedTransaction.Extensions\DistributedTransaction.Extensions.csproj" />
     <ProjectReference Include="..\DistributedTransaction.Redis\DistributedTransaction.Redis.csproj" />
   </ItemGroup>
 

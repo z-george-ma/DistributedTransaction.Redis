@@ -1,8 +1,11 @@
 ﻿using DistributedTransaction.Core;
+using DistributedTransaction.Extensions;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using static DistributedTransaction.Extensions.TaskExtension;
 
 namespace DistributedTransaction.Example
 {
@@ -20,8 +23,8 @@ namespace DistributedTransaction.Example
             var transaction = new Transaction(cache);
 
             (string Message, decimal Price) ret = await transaction
-              .Use<User>(userId, true)     // true means optimistic concurrency lock on getting User
-              .Use<Book>(bookId, true)
+              .Use<User>(userId, true)     // optimistic concurrency lock on getting user
+              .Use<Book>(bookId, true)     // optimistic concurrency lock on getting book
               .Map((ITransaction tx, User user, Book book) =>
               {
                   if (user.Balance < book.Price)
@@ -48,58 +51,73 @@ namespace DistributedTransaction.Example
 
             try
             {
-                await Purchase(userId, bookId, ret.Price);
-
-                return "OK";
+                if (await Purchase(userId, bookId, ret.Price))
+                {
+                    return "OK";
+                }
+                
+                await transaction.Discard();
+                return "Internal error, rolled back";
             }
             catch
             {
                 await transaction.Discard();
-
-                throw; 
+                throw;  // fatal error, inconsistent state
             }
 
         }
 
-        private async Task Purchase(string userId, string bookId, decimal price)
+        private async Task<bool> Purchase(string userId, string bookId, decimal price)
         {
-            await EnqueueUpdateUserBalance(userId, price);
+            var tcc = new TryConfirmCancel();
 
-            try
-            {
-                await EnqueueUpdateBookSKU(bookId, 1);
+            tcc.Try(
+                Retry(() => EnqueueUpdateUserBalance(userId, price))
+                .When<Exception>(RetryPolicy.Immediate(3))
+            ).Cancel(
+                Retry(() => EnqueueUpdateUserBalance(userId, -price))
+                .When<Exception>(RetryPolicy.Immediate(3))
+            );
 
-                try
-                {
-                    await EnqueueCreateOrder(userId, bookId, price);
-                }
-                catch
-                {
-                    await EnqueueUpdateBookSKU(bookId, -1);
-                }
-            }
-            catch
-            {
-                await EnqueueUpdateUserBalance(userId, -price);
-                throw;
-            }
+            tcc.Try(
+                Retry(() => EnqueueUpdateBookSKU(bookId, 1))
+                .When<Exception>(RetryPolicy.Immediate(3))
+            ).Cancel(
+                Retry(() => EnqueueUpdateBookSKU(bookId, -1))
+                .When<Exception>(RetryPolicy.Immediate(3))
+            );
 
-
+            var orderId = Guid.NewGuid().ToString("N");
+            tcc.Try(
+                Retry(() => EnqueueCreateOrder(orderId, userId, bookId, price))
+                .When<Exception>(RetryPolicy.Immediate(3))
+            ).Cancel(
+                Retry(() => EnqueueCancelOrder(orderId))
+                .When<Exception>(RetryPolicy.Immediate(3))
+            );
+            
+            var ret = await tcc.Confirm();
+            return ret.All(e => e == null);
         }
 
-        private async Task EnqueueUpdateUserBalance(string userId, decimal price)
+        private async Task<bool> EnqueueUpdateUserBalance(string userId, decimal price)
         {
-            return;
+            return true;
         }
 
-        private async Task EnqueueUpdateBookSKU(string bookId, int number)
+        private async Task<bool> EnqueueUpdateBookSKU(string bookId, int number)
         {
-            return;
+            return true;
         }
 
-        private async Task EnqueueCreateOrder(string userId, string bookId, decimal price)
+        private async Task<bool> EnqueueCreateOrder(string orderId, string userId, string bookId, decimal price)
         {
-            return;
+            return true;
+        }
+
+        private async Task<bool> EnqueueCancelOrder(string orderId)
+        {
+            return true;
         }
     }
 }

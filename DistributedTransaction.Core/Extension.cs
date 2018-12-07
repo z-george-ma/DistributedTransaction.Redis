@@ -22,15 +22,4 @@ namespace DistributedTransaction.Core
 
         public static string LockKey(string id) => $"Lock:{FullName}:{id}";
     }
-
-    internal static class TaskExtension
-    {
-        public static async Task<TResult> Then<TResult>(this Task self, Func<Task<TResult>> thenProc, bool continueOnCapturedContext = false)
-        {
-            await self.ConfigureAwait(continueOnCapturedContext);
-
-            return await thenProc().ConfigureAwait(continueOnCapturedContext);
-        }
-    }
-
 }
