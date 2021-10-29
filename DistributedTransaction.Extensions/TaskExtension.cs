@@ -69,5 +69,36 @@ namespace DistributedTransaction.Extensions
 
         public static RetryContext<object> Retry(Func<Task> retryProc, bool continueOnCapturedContext = false) =>
             new RetryContext<object>(() => retryProc().Then<object>(() => null, continueOnCapturedContext), continueOnCapturedContext);
+        
+        public static async Task AsTask(this AutoResetEvent self, CancellationToken ct)
+        {
+            var tcs = new TaskCompletionSource<object>();
+            using (ct.Register(() => { tcs.TrySetCanceled(); }))
+            {
+                RegisteredWaitHandle rwh = default;
+                rwh = ThreadPool.RegisterWaitForSingleObject(
+                    self, 
+                    delegate (object s, bool timedOut) 
+                    { 
+                        ((TaskCompletionSource<object>)s).TrySetResult(null); 
+                        rwh.Unregister(self); 
+                    }, tcs, -1, true);
+                await tcs.Task;
+            }
+        }
+
+        public static async Task AsTask(this AutoResetEvent self)
+        {
+            var tcs = new TaskCompletionSource<object>();
+            RegisteredWaitHandle rwh = default;
+            rwh = ThreadPool.RegisterWaitForSingleObject(
+                self,
+                delegate (object s, bool timedOut)
+                {
+                    ((TaskCompletionSource<object>)s).TrySetResult(null);
+                    rwh.Unregister(self);
+                }, tcs, -1, true);
+            await tcs.Task;
+        }
     }
 }
